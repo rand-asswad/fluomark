@@ -1,0 +1,10 @@
+# Ignore during dev
+*.ignore.*
+.archive*
+
+# Ignore results
+plots/
+
+# Python
+__pycache__
+.venv/
