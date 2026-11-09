@@ -4,11 +4,11 @@ dir_path = dirname(realpath(__file__))
 sys.path += [dir_path, dirname(dir_path)]
 
 import numpy as np
-from scipy.integrate import solve_ivp
+from scipy.integrate import solve_ivp, cumulative_trapezoid
 from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 
-from fluomark.kinetics import monod
+from fluomark.kinetics import monod, monod_derivative
 from fluomark.kalman import calibrate_kappa, kalman_filter
 from fluomark.mpl_utils import set_mpl_global, legend
 from model import default_parameters, default_x0, dilution_func, allocation_func
@@ -205,37 +205,27 @@ def plot_results_ecc(t, y, x_true, continuous, samples, alpha_func, d_func,
         a.grid(axis="y", alpha=0.2, lw=0.5)
 
     # Left column: f, fdot, sigma, xi
-
-    plot_variable(ax[0, 0], f_true, continuous["f"], r"$f$", continuous["t"])
-    plot_variable(ax[1, 0], fdot_true, continuous["fdot"],
-                  r"$\dot{f}$", continuous["t"])
+    plot_variable(ax[0, 0], f_true, continuous["f"], "$f$", continuous["t"])
+    plot_variable(ax[1, 0], fdot_true, continuous["fdot"], r"$\dot{f}$", continuous["t"])
     plot_variable(ax[2, 0], sig_true, samples["sig"], r"$\sigma$")
     plot_variable(ax[3, 0], xi_true, samples["xi"], r"$\xi$")
 
     ax[0, 0].scatter(t, y, s=3, color=color_meas, alpha=0.25,
                      edgecolors="none", zorder=2)
 
-    # ============================================================
     # Right column: s, b, alpha, mu
-    # ============================================================
-
-    plot_variable(ax[0, 1], s_true, samples["s"], r"$s$")
-    plot_variable(ax[1, 1], b_true, samples["b"], r"$b$")
-    plot_variable(ax[2, 1], alpha_true, continuous["alpha"],
-                  r"$\alpha$", continuous["t"])
+    plot_variable(ax[0, 1], s_true, samples["s"], "$s$")
+    plot_variable(ax[1, 1], b_true, samples["b"], "$b$")
+    plot_variable(ax[2, 1], alpha_true, continuous["alpha"], r"$\alpha$", continuous["t"])
     plot_variable(ax[3, 1], mu_true, mu_hat, r"$\mu$")
 
-    # ============================================================
     # Shared legend
-    # ============================================================
-
     handles = [
         Line2D([0], [0], color=color_true, lw=1.5, label="True"),
         Line2D([0], [0], color=color_hat, lw=1.0, label="Estimated"),
         Line2D([0], [0], marker=".", color=color_meas, lw=0,
                markersize=5, label="Measurements")
     ]
-
     fig.legend(handles=handles, loc="upper center", ncol=3, frameon=False,
                fontsize=9, bbox_to_anchor=(0.5, 1.05),
                handlelength=2.5, columnspacing=1.3)
@@ -266,9 +256,137 @@ def plot_results_ecc(t, y, x_true, continuous, samples, alpha_func, d_func,
 
     if output_file is not None:
         fig.savefig(output_file, bbox_inches="tight")
+    return fig, ax
+
+def plot_contraction_diagnostics(t, x_true, continuous, samples, d_func,
+                                 params, t_switch, lambdas=(0.1, 0.5, 1.0),
+                                 output_file=None):
+    t = np.asarray(t)
+    s_true, b_true, f_true = x_true.T
+
+    gamma = params["gamma"]
+    beta = params["beta"]
+    mu = lambda s: monod(s, params['mu_max'], params['ks'])
+    mu_deriv = lambda s: monod_derivative(s, params['mu_max'], params['ks'])
+    d = np.array([d_func(ti) for ti in t])
+
+    xi_true = b_true + f_true / beta
+    sig_true = s_true + xi_true / gamma
+    f_hat = np.interp(t, continuous["t"], continuous["f"])
+
+    z_true = np.column_stack((sig_true, xi_true, f_true))
+    z_hat = np.column_stack((samples["sig"], samples["xi"], f_hat))
+
+    # Local Jacobian along the true trajectory.
+    c_true = mu(s_true) - d - mu_deriv(s_true) * b_true / gamma
+
+    # Segment-averaged Jacobian, including nonzero fluorescence error.
+    # This matches the positive-part extension of the growth term.
+    nodes, weights = np.polynomial.legendre.leggauss(32)
+    nodes = (nodes + 1) / 2
+    weights = weights / 2
+    A = np.zeros_like(t, dtype=float)
+
+    for theta, weight in zip(nodes, weights):
+        z_theta = z_true + theta * (z_hat - z_true)
+        s_raw = z_theta[:, 0] - z_theta[:, 1] / gamma
+        b_raw = z_theta[:, 1] - z_theta[:, 2] / beta
+        s_theta = np.maximum(s_raw, 0.0)
+        b_theta = np.maximum(b_raw, 0.0)
+        c_theta = (mu(s_theta) * (b_raw > 0)
+                   - mu_deriv(s_theta) * b_theta * (s_raw > 0) / gamma - d)
+        A += weight * c_theta
+
+    F_A = cumulative_trapezoid(A, t, initial=0.0)
+    F_c = cumulative_trapezoid(c_true, t, initial=0.0)
+
+    M_curves = {}
+    for lam in lambdas:
+        H = F_A + lam * (t - t[0])
+        running_min = np.minimum.accumulate(H)
+        log_M = np.maximum.accumulate(H - running_min)
+        M_curves[lam] = np.exp(np.minimum(log_M, 700))
+
+    #fig, ax = plt.subplots(3, 1, figsize=(7.15, 6.0), sharex=True)
+
+    #ax[0].plot(t, c_true, color="tab:blue", lw=1.3,
+    #           label=r"$c(z(t),d(t))$")
+    #ax[0].plot(t, A, color="tab:red", lw=1.3, label=r"$A(t)$")
+    #ax[0].set_ylabel(r"$c,\ A$ [h$^{-1}$]")
+    #ax[0].legend(frameon=False, fontsize=9)
+
+    #ax[1].plot(t, F_c, color="tab:blue", lw=1.3,
+    #           label=r"$\int_0^t c(z(u),d(u))\,du$")
+    #ax[1].plot(t, F_A, color="tab:red", lw=1.3,
+    #           label=r"$\int_0^t A(u)\,du$")
+    #ax[1].set_ylabel("Cumulative integral")
+    #ax[1].legend(frameon=False, fontsize=9)
+
+    #for lam, M in M_curves.items():
+    #    ax[2].plot(t, M, lw=1.3, label=rf"$\lambda={lam:g}$")
+    #ax[2].set_ylabel(r"$M_\lambda(T)$")
+    #ax[2].set_xlabel(r"$T$ [hours]")
+    #ax[2].legend(frameon=False, fontsize=9)
+
+    #for a in ax:
+    #    a.axvline(t_switch, color="0.55", ls="--", lw=1)
+    #    a.grid(axis="y", alpha=0.2, lw=0.5)
+    #    a.tick_params(axis="both", labelsize=8)
+    #    a.set_xlim(t[0], t[-1])
+
+    #ax[0].axhline(0, color="0.4", lw=0.7)
+    #ax[1].axhline(0, color="0.4", lw=0.7)
+    #fig.align_ylabels()
+    #fig.subplots_adjust(left=0.12, right=0.98, bottom=0.09,
+    #                    top=0.98, hspace=0.18)
+
+    fig, ax = plt.subplots(2, 1, figsize=(7.15, 3.0), sharex=True)
+    ax_int = ax[0].twinx()
+
+    # Local contraction coefficient and accumulated contraction
+    lc, = ax[0].plot(t, c_true, color="tab:blue", lw=1.3, label=r"$c(z(t),d(t))$")
+    la, = ax_int.plot(t, F_A, color="tab:red", lw=1.3, label=r"$\int_0^t A(u)\,du$")
+
+    #ax[0].set_ylabel(r"$c(z(t),d(t))$ [h$^{-1}$]", color="tab:blue")
+    #ax_int.set_ylabel(r"$\int_0^t A(u)\,du$", color="tab:red")
+    ax[0].tick_params(axis="y", colors="tab:blue")
+    ax_int.tick_params(axis="y", colors="tab:red")
+    ax[0].legend(handles=[lc, la], loc="upper right", frameon=False, fontsize=13)
+
+    # Minimum accumulated-contraction constant
+    for lam, M in M_curves.items():
+        ax[1].plot(t, np.log(M), lw=1.3, label=rf"$\lambda={lam:g}$")
+
+    ax[1].set_ylabel(r"$\ln M_\lambda(t)$")
+    ax[1].set_xlabel(r"$t$ [hours]")
+    ax[1].legend(frameon=False, fontsize=12, loc="upper right")
+
+    for a in ax:
+        a.axvline(t_switch, color="0.55", ls="--", lw=1)
+        a.grid(axis="y", alpha=0.2, lw=0.5)
+        a.tick_params(axis="both", labelsize=8)
+        a.set_xlim(t[0], t[-1])
+    
+    ax_int.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useMathText=True)
+    ax_int.yaxis.get_offset_text().set_fontsize(7)
+
+    fig.subplots_adjust(left=0.06, right=0.95, bottom=0.10,
+                        top=0.99, hspace=0.10)
+
+
+    if output_file is not None:
+        fig.savefig(output_file, bbox_inches="tight")
     #plt.show()
 
-    return fig, ax
+    return fig, ax, {
+        "c": c_true,
+        "A": A,
+        "F_c": F_c,
+        "F_A": F_A,
+        "M": M_curves,
+        "e_f": f_hat - f_true,
+    }
+
 
 # MAIN =========================================================================
 
@@ -307,7 +425,7 @@ if __name__ == "__main__":
     print(f"Estimated kappa:\t\t{kappa_hat:.6e}")
     print(f"Calibration log-likelihood:\t{log_likelihood:.6f}")
     
-    
+    # initial estimates
     s0_hat, b0_hat, f0_hat = x0_hat
     xi0_hat = b0_hat + f0_hat / params["beta"]
     sig0_hat = s0_hat + xi0_hat / params["gamma"]
@@ -320,3 +438,7 @@ if __name__ == "__main__":
     plot_results_ecc(t, y, x_true, continuous, samples, alpha_func, d_func,
         params, t_switch, output_file=f"{PLOT_DIR}/observer_pipeline_ecc.pdf")
 
+    fig, ax, contraction = plot_contraction_diagnostics(
+        t, x_true, continuous, samples, d_func, params, t_switch,
+        output_file=f"{PLOT_DIR}/contraction_diagnostics.pdf"
+    )
