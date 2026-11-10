@@ -10,7 +10,7 @@ from matplotlib.lines import Line2D
 
 from fluomark.kinetics import monod, monod_derivative
 from fluomark.kalman import calibrate_kappa, kalman_filter
-from fluomark.mpl_utils import set_mpl_global, legend
+from fluomark.mpl_utils import set_mpl_global, legend, add_data_inset
 from model import default_parameters, default_x0, dilution_func, allocation_func
 
 # MODEL ========================================================================
@@ -198,7 +198,7 @@ def plot_results_ecc(t, y, x_true, continuous, samples, alpha_func, d_func,
 
         a.axvline(t_switch, color=color_switch, ls="--", lw=1, zorder=1)
         a.plot(t, true, color=color_true, lw=1.5)
-        a.plot(t_est, estimated, color=color_hat, lw=1.0)
+        a.plot(t_est, estimated, color=color_hat, lw=1.5)
 
         a.set_ylabel(ylabel, fontsize=11)
         a.tick_params(axis="both", labelsize=8)
@@ -210,7 +210,7 @@ def plot_results_ecc(t, y, x_true, continuous, samples, alpha_func, d_func,
     plot_variable(ax[2, 0], sig_true, samples["sig"], r"$\sigma$")
     plot_variable(ax[3, 0], xi_true, samples["xi"], r"$\xi$")
 
-    ax[0, 0].scatter(t, y, s=3, color=color_meas, alpha=0.25,
+    ax[0, 0].scatter(t, y, s=5, color=color_meas, alpha=0.35,
                      edgecolors="none", zorder=2)
 
     # Right column: s, b, alpha, mu
@@ -229,6 +229,10 @@ def plot_results_ecc(t, y, x_true, continuous, samples, alpha_func, d_func,
     fig.legend(handles=handles, loc="upper center", ncol=3, frameon=False,
                fontsize=9, bbox_to_anchor=(0.5, 1.05),
                handlelength=2.5, columnspacing=1.3)
+
+    t_zoom = (36, 48)
+    zoom_position = (0.62, 0.08, 0.35, 0.50)
+    zoom_f = add_data_inset(ax[0, 0], t_zoom, zoom_position, noticks=True, visible=(0, 3))
 
     # Axes formatting
     for a in ax.flat:
@@ -340,7 +344,7 @@ def plot_contraction_diagnostics(t, x_true, continuous, samples, d_func,
     #fig.subplots_adjust(left=0.12, right=0.98, bottom=0.09,
     #                    top=0.98, hspace=0.18)
 
-    fig, ax = plt.subplots(2, 1, figsize=(7.15, 3.0), sharex=True)
+    fig, ax = plt.subplots(2, 1, figsize=(5, 2.5), sharex=True)
     ax_int = ax[0].twinx()
 
     # Local contraction coefficient and accumulated contraction
@@ -351,7 +355,9 @@ def plot_contraction_diagnostics(t, x_true, continuous, samples, d_func,
     #ax_int.set_ylabel(r"$\int_0^t A(u)\,du$", color="tab:red")
     ax[0].tick_params(axis="y", colors="tab:blue")
     ax_int.tick_params(axis="y", colors="tab:red")
-    ax[0].legend(handles=[lc, la], loc="upper right", frameon=False, fontsize=13)
+    ax[0].legend(handles=[lc, la], loc="upper right", frameon=False,
+                 fontsize=13, ncols=2, bbox_to_anchor=(1.0, 1.0),
+                 borderpad=0, labelspacing=0.1, borderaxespad=0.3)
 
     # Minimum accumulated-contraction constant
     for lam, M in M_curves.items():
@@ -359,20 +365,23 @@ def plot_contraction_diagnostics(t, x_true, continuous, samples, d_func,
 
     ax[1].set_ylabel(r"$\ln M_\lambda(t)$")
     ax[1].set_xlabel(r"$t$ [hours]")
-    ax[1].legend(frameon=False, fontsize=12, loc="upper right")
+    ax[1].legend(frameon=False, fontsize=12, loc="upper right", ncols=3,
+                 bbox_to_anchor=(1.0, 0.88), borderpad=0)
 
     for a in ax:
         a.axvline(t_switch, color="0.55", ls="--", lw=1)
         a.grid(axis="y", alpha=0.2, lw=0.5)
         a.tick_params(axis="both", labelsize=8)
         a.set_xlim(t[0], t[-1])
+    ax[0].set_ylim(ax[0].get_ylim()[0], 70)
+    ax_int.set_ylim(ax_int.get_ylim()[0], 2900)
+    ax[1].set_ylim(ax[1].get_ylim()[0], 5.4)
     
     ax_int.ticklabel_format(axis="y", style="sci", scilimits=(-3, 3), useMathText=True)
-    ax_int.yaxis.get_offset_text().set_fontsize(7)
+    ax_int.yaxis.get_offset_text().set_fontsize(9)
 
-    fig.subplots_adjust(left=0.06, right=0.95, bottom=0.10,
-                        top=0.99, hspace=0.10)
-
+    fig.subplots_adjust(left=0.075, right=0.95, bottom=0.2,
+                        top=0.945, hspace=0.1)
 
     if output_file is not None:
         fig.savefig(output_file, bbox_inches="tight")
@@ -396,7 +405,7 @@ if __name__ == "__main__":
 
     # model parameters
     params = default_parameters
-    x0 = np.array([0.0, 1, 0.0])
+    x0 = default_x0 # np.array([0.0, 1, 0.0])
     x0_hat = np.array([0.5, 1.5, 0.0])
 
     # alpha(t): logistic function 0 -> alpha_max

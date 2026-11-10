@@ -9,7 +9,7 @@ from matplotlib import pyplot as plt
 from matplotlib.lines import Line2D
 
 from fluomark.kinetics import monod
-from fluomark.mpl_utils import set_mpl_global, legend
+from fluomark.mpl_utils import set_mpl_global, legend, add_data_inset
 from model import default_parameters, default_x0, dilution_func, allocation_func
 
 # MODEL ========================================================================
@@ -138,22 +138,15 @@ def plot_results(t, x_true, f_lo, f_hi, intervals, alpha_func, params,
     return fig, ax
 
 
-def plot_results_ecc(t, x_true, f_lo, f_hi, intervals, alpha_func, params,
-                 output_file=None):
+def plot_results_ecc(t, x_true, f_lo, f_hi, intervals, output_file=None):
     s, b, f = x_true.T
-    xi = b + f / params["beta"]
-    sig = s + xi / params["gamma"]
-    mu = monod(s, params["mu_max"], params["ks"])
 
     quantities = [
         ("s", s, "$s$"),
         ("b", b, "$b$"),
-        #("f", f, "$f$"),
-        #("sig", sig, r"$\sigma$"),
-        #("xi", xi, r"$\xi$"),
     ]
 
-    fig, ax = plt.subplots(2, 1, figsize=(3.5, 2.7), sharex=True)
+    fig, ax = plt.subplots(2, 1, figsize=(4.0, 3.1), sharex=True)
     for a, (key, true, ylabel) in zip(ax.flat, quantities):
         a.plot(t, true, "k", lw=1.4, label="True")
         if key == "f":
@@ -164,10 +157,14 @@ def plot_results_ecc(t, x_true, f_lo, f_hi, intervals, alpha_func, params,
             lo, hi = intervals[f"{key}_lo"], intervals[f"{key}_hi"]
         if lo is not None:
             a.fill_between(t, lo, hi, facecolor="tab:blue", alpha=0.2, label="Interval")
-            #a.plot(t, lo, color="tab:blue", lw=0.75)
-            #a.plot(t, hi, color="tab:blue", lw=0.75)
         a.set_ylabel(ylabel)
         a.grid(alpha=0.2)
+
+    # inset axes
+    t_zoom = (36, 48)
+    x0, w = 0.5, 0.45
+    zoom_s = add_data_inset(ax[0], t_zoom, (x0, 0.35, w, 0.5), visible=(0, 2), noticks=False)
+    zoom_b = add_data_inset(ax[1], t_zoom, (x0, 0.60, w, 0.3), visible=(0, 2), noticks=False)
 
     ax[1].set_ylim(0, 1.5)
 
@@ -179,26 +176,13 @@ def plot_results_ecc(t, x_true, f_lo, f_hi, intervals, alpha_func, params,
     fig.tight_layout()
     fig.align_labels()
     fig.subplots_adjust(
-        left=0.15, right=0.96,
+        left=0.13, right=0.96,
         top=0.98, bottom=0.16,
         hspace=0.12,
     )
     if output_file is not None:
         fig.savefig(output_file)
     return fig, ax
-
-
-def print_containment(t, x_true, intervals, params):
-    s, b, f = x_true.T
-    xi = b + f / params["beta"]
-    sig = s + xi / params["gamma"]
-    mu = monod(s, params["mu_max"], params["ks"])
-    truth = {"sig": sig, "xi": xi, "s": s, "b": b,
-             "mu": mu, "r": mu * b}
-    for key, actual in truth.items():
-        lo, hi = intervals[f"{key}_lo"], intervals[f"{key}_hi"]
-        violation = max(np.max(lo - actual), np.max(actual - hi), 0.0)
-        print(f"{key:>3s}: max sampled containment violation = {violation:.3e}")
 
 
 # MAIN =========================================================================
@@ -258,8 +242,7 @@ if __name__ == "__main__":
     intervals = interval_observer(t, f_lo, f_hi, sig0_bounds, xi0_bounds,
                                   mu_max_bounds, ks_bounds, d_func, params)
     print("Monod parameter intervals:", mu_max_bounds, ks_bounds)
-    #print_containment(t, x_true, intervals, params)
     plot_results(t, x_true, f_lo, f_hi, intervals, alpha_func, params,
                  output_file=f"{PLOT_DIR}/interval_observer.pdf")
-    plot_results_ecc(t, x_true, f_lo, f_hi, intervals, alpha_func, params,
+    plot_results_ecc(t, x_true, f_lo, f_hi, intervals,
                      output_file=f"{PLOT_DIR}/interval_observer_ecc.pdf")
