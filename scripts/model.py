@@ -60,7 +60,7 @@ def c_star(alpha, d, params=default_parameters):
 
 # PLOTS ========================================================================
 
-def operational_diagram(params=default_parameters):
+def operational_diagram(params=default_parameters, point=None):
     alpha = np.linspace(0, 1, 500)
     d_max = 1.02 * monod(params['s_in'], params['mu_max'], params['ks'])
     d = np.linspace(0, d_max, 500)
@@ -72,7 +72,7 @@ def operational_diagram(params=default_parameters):
     C = np.full_like(A, np.nan, dtype=float)
     C[valid] = c_star(A[valid], D[valid], params)
 
-    fig, ax = plt.subplots(figsize=(3.8, 2))
+    fig, ax = plt.subplots(figsize=(5, 2.6))
 
     # contraction function contours
     contourf = ax.contourf(A, D, C, levels=30)
@@ -92,6 +92,11 @@ def operational_diagram(params=default_parameters):
     #ax.plot([], [], label=r"$c^\star(\alpha,d)=0$", color=c0_color)
     cbar.add_lines(c0)
 
+    # equilibrium point
+    if point is not None:
+        alpha_star, d_star = point
+        ax.plot(alpha_star, d_star, "wo", mec="black", mew=1.2, ms=7, zorder=10)
+
     ax.set_xlabel(r"$\alpha$")
     ax.set_ylabel(r"$d$")
     ax.set_xlim(0.0, 1.0)
@@ -102,8 +107,8 @@ def operational_diagram(params=default_parameters):
 
     fig.tight_layout()
     fig.subplots_adjust(
-        top=0.96, bottom=0.2,
-        left=0.14, right=0.91,
+        top=0.98, bottom=0.17,
+        left=0.1, right=0.975,
     )
 
     plt.savefig(f"{PLOT_DIR}/equilibrium_contraction.pdf")
@@ -117,5 +122,4 @@ if __name__ == "__main__":
     PLOT_DIR = "plots"
     set_mpl_global(output_dir=PLOT_DIR)
 
-    operational_diagram()
-    plt.show()
+    operational_diagram(point=(0.3, 0.15))
